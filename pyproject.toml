@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tg-signal-copier"
+version = "0.1.0"
+description = "Telegram signal scraper and webhook dispatcher"
+authors = [
+    { name = "Dev", email = "dev@local" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "telethon>=1.30.0",
+    "httpx>=0.25.0",
+    "aiosqlite>=0.19.0",
+    "pydantic>=2.4.0",
+    "pyyaml>=6.0.1",
+]
+
+[project.scripts]
+tg-copier = "tg_signal_copier.cli:main"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
