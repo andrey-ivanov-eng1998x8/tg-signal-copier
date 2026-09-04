@@ -37,3 +37,41 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+async def _run(config_path: str):
+    cfg = load_config(config_path)
+    listener = SignalListener(cfg)
+
+    loop = asyncio.get_running_loop()
+    stop_event = asyncio.Event()
+
+    def _on_signal():
+        logger.info("Shutdown signal received, draining tasks...")
+        stop_event.set()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, _on_signal)
+        except NotImplementedError:
+            # Windows fallback
+            signal.signal(sig, lambda *_: _on_signal())
+
+    await listener.start()
+    await stop_event.wait()
+    await listener.stop()
+
+
+def main() -> int:
+    parser = build_parser()
+    args = parser.parse_args()
+
+    setup_logging(args.log_level)
+    logger.info("Starting tg-signal-copier using config=%s", args.config)
+
+    try:
+        asyncio.run(_run(args.config))
+        return 0
+    except (KeyboardInterrupt, SystemExit):
+        return 0
+    except Exception as e:
+        logger.exception("Fatal error in runner: %s", e)
+        return 1
