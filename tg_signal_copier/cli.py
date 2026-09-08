@@ -6,6 +6,7 @@ import signal
 import sys
 from tg_signal_copier.config import load_config
 from tg_signal_copier.client import SignalListener
+from tg_signal_copier.parser import parse_signal
 
 logger = logging.getLogger("tg_signal_copier")
 
@@ -34,6 +35,11 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Set console logging verbosity",
     )
+    parser.add_argument(
+        "--test-parse",
+        metavar="TEXT",
+        help="Test parser against a raw message string without connecting to Telegram",
+    )
     return parser
 
 
@@ -57,7 +63,12 @@ async def _run(config_path: str):
 
     await listener.start()
     await stop_event.wait()
-    await listener.stop()
+
+    # FIXME: telethon event loop sometimes hangs on SIGINT if sqlite lock is held
+    try:
+        await asyncio.wait_for(listener.stop(), timeout=8.0)
+    except asyncio.TimeoutError:
+        logger.warning("Listener stop timed out after 8s, forcing exit")
 
 
 def main() -> int:
@@ -65,6 +76,16 @@ def main() -> int:
     args = parser.parse_args()
 
     setup_logging(args.log_level)
+
+    if args.test_parse:
+        # print(f"DEBUG raw input: {args.test_parse!r}")
+        result = parse_signal(args.test_parse)
+        if result:
+            print(result.model_dump_json(indent=2))
+            return 0
+        print("Failed to parse signal from input text.", file=sys.stderr)
+        return 1
+
     logger.info("Starting tg-signal-copier using config=%s", args.config)
 
     try:
