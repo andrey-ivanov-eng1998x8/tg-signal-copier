@@ -1,3 +1,7 @@
 """Telegram signal scraper and parser daemon."""
 
-__version__ = "0.1.0"
+from tg_signal_copier.cli import main
+
+__version__ = "0.3.0"
+
+__all__ = ["main", "__version__"]

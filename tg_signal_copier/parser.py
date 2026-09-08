@@ -20,18 +20,17 @@ class ParsedSignal:
     raw_text: str = ""
 
 
-# Common crypto quote currencies
 KNOWN_QUOTES = ("USDT", "USDC", "BUSD", "USD", "BTC", "ETH")
-
-# Emojis and garbage cleanup
 CLEANUP_RE = re.compile(r"[\u2700-\u27BF\uE000-\uF8FF\uD83C-\uDBFF\uDC00-\uDFFF]+")
 
-# Pattern matchers for cornix, vip, and unstructured posts
 SIDE_RE = re.compile(r"\b(LONG|SHORT|BUY|SELL)\b", re.IGNORECASE)
+# Handles #BTC/USDT, BTC-USDT, BTCUSDT, and spaced pairs like BTC USDT
 SYMBOL_LINE_RE = re.compile(r"(?:#|\b)([A-Z0-9]{2,10})[/_\- ]?(USDT|USDC|BUSD|USD|BTC|ETH)\b", re.IGNORECASE)
 GENERIC_PAIR_RE = re.compile(r"#([A-Z0-9]{2,10})")
 
-# Entries can be single, list, or ranges like 1.23 - 1.25 or 0.045-0.042
+# Also match perpetual indicators, e.g. ETHPERP or BTC.P
+PERP_SUFFIX_RE = re.compile(r"^([A-Z0-9]+)(?:\.P|PERP)$", re.IGNORECASE)
+
 RANGE_ENTRY_RE = re.compile(
     r"(?:ENTRY|ENTRIES|BUY(?:ING)?(?:\s*ZONE)?)\s*[:=-]?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:-|–|to)\s*([0-9]+(?:\.[0-9]+)?)",
     re.IGNORECASE,
@@ -53,10 +52,8 @@ LEV_RE = re.compile(r"(?:LEVERAGE|LEV)\s*[:=-]?\s*(?:CROSS|ISOLATED)?\s*([0-9]{1
 
 
 def _clean_text(raw: str) -> str:
-    # normalize spaces and remove zero width quirks
     nfkd = unicodedata.normalize("NFKD", raw)
     no_emojis = CLEANUP_RE.sub(" ", nfkd)
-    # strip asterisks used for bold text in telegram markdown
     return no_emojis.replace("*", "").replace("`", "").replace("_", " ")
 
 
@@ -65,14 +62,20 @@ def _extract_symbol(cleaned: str) -> str | None:
     if match:
         base = match.group(1).upper()
         quote = match.group(2).upper()
+        # guard against weird false positives like ENTRYUSDT
+        if base in ("ENTRY", "BUY", "SELL", "LONG", "SHORT"):
+            return None
         return f"{base}{quote}"
 
-    # Fallback for solitary hashtag tokens like #SOL
+    # Fallback for solitary hashtag tokens like #SOL or #ETHPERP
     generic = GENERIC_PAIR_RE.search(cleaned)
     if generic:
         tag = generic.group(1).upper()
-        if not tag.endswith("USDT") and len(tag) <= 6:
-            return f"{tag}USDT"
+        perp_m = PERP_SUFFIX_RE.match(tag)
+        if perp_m:
+            tag = f"{perp_m.group(1)}USDT"
+        elif not any(tag.endswith(q) for q in KNOWN_QUOTES) and len(tag) <= 6:
+            tag = f"{tag}USDT"
         return tag
     return None
 
@@ -95,7 +98,6 @@ def parse_signal(raw_text: str) -> ParsedSignal | None:
     if not symbol:
         return None
 
-    # Target points
     tps: list[float] = []
     for match in TP_LINE_RE.finditer(text):
         try:
@@ -105,7 +107,6 @@ def parse_signal(raw_text: str) -> ParsedSignal | None:
         except ValueError:
             continue
 
-    # Stop loss
     sl_match = SL_LINE_RE.search(text)
     stop_loss = None
     if sl_match:
@@ -114,7 +115,6 @@ def parse_signal(raw_text: str) -> ParsedSignal | None:
         except ValueError:
             pass
 
-    # Entry zone or specific prices
     entry_min = None
     entry_max = None
     entries: list[float] = []
@@ -141,7 +141,6 @@ def parse_signal(raw_text: str) -> ParsedSignal | None:
             entry_min = min(entries)
             entry_max = max(entries)
 
-    # Multiplier ratio / lev
     lev_ratio = None
     lev_match = LEV_RE.search(text)
     if lev_match:
@@ -150,7 +149,7 @@ def parse_signal(raw_text: str) -> ParsedSignal | None:
         except ValueError:
             pass
 
-    # Heuristic scoring to reject noisy messages that look vaguely like signals
+    # Heuristic scoring to reject noisy chatter in channels
     score = 0.0
     if symbol: score += 0.3
     if side: score += 0.2
@@ -158,7 +157,6 @@ def parse_signal(raw_text: str) -> ParsedSignal | None:
     if tps: score += 0.15
     if stop_loss is not None: score += 0.1
 
-    # Need at least symbol + direction + (entry or target)
     if score < 0.5:
         return None
 
