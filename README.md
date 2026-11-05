@@ -45,4 +45,4 @@ python -m tg_signal_copier parse-test --file sample_signal.txt
 
 MIT
 
-<!-- checked: 2026-11-04 -->
+<!-- checked: 2026-11-05 -->
